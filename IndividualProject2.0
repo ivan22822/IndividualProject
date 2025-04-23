@@ -1,0 +1,79 @@
+// --- Подключаем необходимые библиотеки --- #include <WiFi.h> #include <WebServer.h>
+
+// --- Настройки Wi-Fi --- const char* WIFI_SSID = "SSID"; const char* WIFI_PASSWORD = "123456789";
+
+// --- Настройка пинов моторов --- #define LEFT_MOTOR_IN1   32 #define LEFT_MOTOR_IN2   33 #define RIGHT_MOTOR_IN1  25 #define RIGHT_MOTOR_IN2  26
+
+// --- Настройка пинов ультразвуковых датчиков --- #define TRIG_FRONT 13  // передний датчик триггер #define ECHO_FRONT 12  // передний датчик эхо #define TRIG_LEFT  27  // левый датчик триггер #define ECHO_LEFT  23  // левый датчик эхо #define TRIG_RIGHT 17  // правый датчик триггер #define ECHO_RIGHT 18  // правый датчик эхо
+
+// --- Настройки задержек и расстояний --- #define TURN_DELAY  500              // задержка поворота на 90 градусов (мс) #define DIST_THRESHOLD 20            // расстояние до препятствия (см) #define POSITION_UPDATE_INTERVAL 100 // интервал обновления координат (мс)
+
+WebServer server(80);
+
+// --- Глобальные переменные --- const char* moveState = "STOPPED"; int directionIndex = 0; // 0 - север, 1 - восток, 2 - юг, 3 - запад long posX = 0, posY = 0; unsigned long lastUpdate = 0; bool logicInverted = false; // инверсия направления логики (для визуализации)
+
+int leftSpeed = 255;  // базовая скорость левого мотора int rightSpeed = 255; // базовая скорость правого мотора
+
+void stopMotors() { digitalWrite(LEFT_MOTOR_IN1, LOW); digitalWrite(LEFT_MOTOR_IN2, LOW); digitalWrite(RIGHT_MOTOR_IN1, LOW); digitalWrite(RIGHT_MOTOR_IN2, LOW); }
+
+void moveForward() { analogWrite(LEFT_MOTOR_IN1, leftSpeed); digitalWrite(LEFT_MOTOR_IN2, LOW); analogWrite(RIGHT_MOTOR_IN1, rightSpeed); digitalWrite(RIGHT_MOTOR_IN2, LOW); moveState = logicInverted ? "BACKWARD" : "FORWARD"; }
+
+void turnLeft90() { analogWrite(LEFT_MOTOR_IN1, 0); digitalWrite(LEFT_MOTOR_IN2, HIGH); analogWrite(RIGHT_MOTOR_IN1, rightSpeed); digitalWrite(RIGHT_MOTOR_IN2, LOW); moveState = logicInverted ? "TURN_RIGHT" : "TURN_LEFT"; delay(TURN_DELAY); stopMotors(); directionIndex = (directionIndex + 3) % 4; }
+
+void turnRight90() { analogWrite(LEFT_MOTOR_IN1, leftSpeed); digitalWrite(LEFT_MOTOR_IN2, LOW); analogWrite(RIGHT_MOTOR_IN1, 0); digitalWrite(RIGHT_MOTOR_IN2, HIGH); moveState = logicInverted ? "TURN_LEFT" : "TURN_RIGHT"; delay(TURN_DELAY); stopMotors(); directionIndex = (directionIndex + 1) % 4; }
+
+long measureDistance(int trigPin, int echoPin) { digitalWrite(trigPin, LOW); delayMicroseconds(2); digitalWrite(trigPin, HIGH); delayMicroseconds(10); digitalWrite(trigPin, LOW); long duration = pulseIn(echoPin, HIGH, 30000UL); if (duration == 0) return 999; return duration / 58; }
+
+void adjustMotorSpeeds(long distLeft, long distRight) { int delta = distRight - distLeft; leftSpeed = constrain(255 + delta / 2, 180, 255); rightSpeed = constrain(255 - delta / 2, 180, 255); }
+
+const char HTML_PAGE[] PROGMEM = R"rawliteral(
+
+<!DOCTYPE html><html>
+<head><meta charset="UTF-8"><title>Робот</title></head>
+<body>
+<h1>Состояние робота: <span id="status">—</span></h1>
+<canvas id="c" width="400" height="400" style="border:1px solid"></canvas>
+<script>
+let x = 200, y = 200;
+let dir = 0;
+setInterval(() => {
+ fetch('/state').then(r => r.text()).then(d => {
+   let [s, dx, dy] = d.split(',');
+   document.getElementById('status').innerText = s;
+   let ctx = document.getElementById('c').getContext('2d');
+   ctx.beginPath();
+   ctx.moveTo(x, y);
+   x = 200 + parseInt(dx);
+   y = 200 - parseInt(dy);
+   ctx.lineTo(x, y);
+   ctx.stroke();
+ });
+}, 200);
+</script>
+</body></html>
+)rawliteral";void handleRoot() { server.send_P(200, "text/html", HTML_PAGE); }
+
+void handleState() { char buffer[50]; snprintf(buffer, sizeof(buffer), "%s,%ld,%ld", moveState, posX, posY); server.send(200, "text/plain", buffer); }
+
+void setup() { Serial.begin(115200);
+
+pinMode(LEFT_MOTOR_IN1, OUTPUT); pinMode(LEFT_MOTOR_IN2, OUTPUT); pinMode(RIGHT_MOTOR_IN1, OUTPUT); pinMode(RIGHT_MOTOR_IN2, OUTPUT);
+
+pinMode(TRIG_FRONT, OUTPUT); pinMode(ECHO_FRONT, INPUT); pinMode(TRIG_LEFT, OUTPUT); pinMode(ECHO_LEFT, INPUT); pinMode(TRIG_RIGHT, OUTPUT); pinMode(ECHO_RIGHT, INPUT);
+
+stopMotors();
+
+WiFi.begin(WIFI_SSID, WIFI_PASSWORD); while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); } Serial.println(WiFi.localIP());
+
+server.on("/", handleRoot); server.on("/state", handleState); server.begin(); }
+
+void loop() { server.handleClient();
+
+long distFront = measureDistance(TRIG_FRONT, ECHO_FRONT); long distLeft = measureDistance(TRIG_LEFT, ECHO_LEFT); long distRight = measureDistance(TRIG_RIGHT, ECHO_RIGHT);
+
+adjustMotorSpeeds(distLeft, distRight);
+
+if (distLeft > DIST_THRESHOLD) { turnLeft90(); } else if (distFront > DIST_THRESHOLD) { moveForward(); if (millis() - lastUpdate > POSITION_UPDATE_INTERVAL) { lastUpdate = millis(); int sign = logicInverted ? -1 : 1; switch (directionIndex) { case 0: posY += sign; break; case 1: posX += sign; break; case 2: posY -= sign; break; case 3: posX -= sign; break; } } } else if (distRight > DIST_THRESHOLD) { turnRight90(); } else { turnLeft90(); delay(100); turnLeft90(); moveState = "TURN_AROUND"; logicInverted = !logicInverted; directionIndex = (directionIndex + 2) % 4; }
+
+delay(1); }
+
