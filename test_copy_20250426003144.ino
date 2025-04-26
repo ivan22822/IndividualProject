@@ -52,23 +52,29 @@ void moveForward() {
 }
 
 void turnLeft90() {
-  digitalWrite(LEFT_MOTOR_IN1, LOW);
-  digitalWrite(LEFT_MOTOR_IN2, HIGH);
-  digitalWrite(RIGHT_MOTOR_IN1, HIGH);
-  digitalWrite(RIGHT_MOTOR_IN2, LOW);
+  unsigned long startTime = millis();
   moveState = "TURN_LEFT";
-  delay(TURN_DELAY);
+  while (millis() - startTime < TURN_DELAY) {
+    digitalWrite(LEFT_MOTOR_IN1, LOW);
+    digitalWrite(LEFT_MOTOR_IN2, HIGH);
+    digitalWrite(RIGHT_MOTOR_IN1, HIGH);
+    digitalWrite(RIGHT_MOTOR_IN2, LOW);
+    server.handleClient();
+  }
   stopMotors();
   directionIndex = (directionIndex + 3) % 4;
 }
 
 void turnRight90() {
-  digitalWrite(LEFT_MOTOR_IN1, HIGH);
-  digitalWrite(LEFT_MOTOR_IN2, LOW);
-  digitalWrite(RIGHT_MOTOR_IN1, LOW);
-  digitalWrite(RIGHT_MOTOR_IN2, HIGH);
+  unsigned long startTime = millis();
   moveState = "TURN_RIGHT";
-  delay(TURN_DELAY);
+  while (millis() - startTime < TURN_DELAY) {
+    digitalWrite(LEFT_MOTOR_IN1, HIGH);
+    digitalWrite(LEFT_MOTOR_IN2, LOW);
+    digitalWrite(RIGHT_MOTOR_IN1, LOW);
+    digitalWrite(RIGHT_MOTOR_IN2, HIGH);
+    server.handleClient();
+  }
   stopMotors();
   directionIndex = (directionIndex + 1) % 4;
 }
@@ -223,8 +229,9 @@ void setup() {
   stopMotors();
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    unsigned long delayStart = millis(); while (millis() - delayStart < 500) { server.handleClient(); }
     Serial.print(".");
   }
   Serial.println(WiFi.localIP());
@@ -267,10 +274,11 @@ void loop() {
     turnRight90();
   } else {
     lastTurnTime = now;
-    turnLeft90(); delay(100); turnLeft90();
+    turnLeft90(); unsigned long startMillis = millis(); while (millis() - startMillis < 100) {} turnLeft90();
     moveState = "TURN_AROUND";
     directionIndex = (directionIndex + 2) % 4;
   }
 
   delay(1);
 }
+
